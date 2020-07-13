@@ -27,7 +27,7 @@ from logbook import Logger
 
 import gui.globalEvents as GE
 import gui.mainFrame
-from gui.auxFrame import AuxiliaryFrame
+from gui.auxWindow import AuxiliaryFrame
 from gui.bitmap_loader import BitmapLoader
 from gui.builtinViews.entityEditor import BaseValidator, EntityEditor
 from gui.utils.clipboard import fromClipboard, toClipboard
@@ -183,7 +183,7 @@ class TargetProfileEditor(AuxiliaryFrame):
             ttText, unitText = self.ATTRIBUTES[attr]
             bmp = wx.StaticBitmap(self, wx.ID_ANY, BitmapLoader.getBitmap("%s_big" % attr, "gui"))
             bmp.SetToolTip(wx.ToolTip(ttText))
-            miscAttrSizer.Add(bmp, 0, wx.ALIGN_CENTER_VERTICAL | wx.ALIGN_RIGHT | wx.LEFT, leftPad)
+            miscAttrSizer.Add(bmp, 0, wx.LEFT | wx.ALIGN_CENTER_VERTICAL, leftPad)
             # set text edit
             editBox = FloatBox(parent=self, id=wx.ID_ANY, value=None, pos=wx.DefaultPosition, size=defSize)
             editBox.SetToolTip(wx.ToolTip(ttText))
@@ -231,7 +231,7 @@ class TargetProfileEditor(AuxiliaryFrame):
             setattr(self, name, btn)
             btn.Enable(True)
             btn.SetToolTip("%s profiles %s clipboard" % (name, direction))
-            footerSizer.Add(btn, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_RIGHT)
+            footerSizer.Add(btn, 0)
             btn.Bind(wx.EVT_BUTTON, getattr(self, "{}Patterns".format(name.lower())))
 
         if not self.entityEditor.checkEntitiesExist():

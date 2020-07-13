@@ -146,6 +146,12 @@ class Effect(EqBase):
 
         return self.__effectDef is not None
 
+    @property
+    def dealsDamage(self):
+        if not self.__generated:
+            self.__generateHandler()
+        return self.__dealsDamage
+
     def isType(self, type):
         """
         Check if this effect is of the passed type
@@ -167,6 +173,7 @@ class Effect(EqBase):
             self.__handler = getattr(effectDef, "handler", eos.effects.BaseEffect.handler)
             self.__runTime = getattr(effectDef, "runTime", "normal")
             self.__activeByDefault = getattr(effectDef, "activeByDefault", True)
+            self.__dealsDamage = effectDef.dealsDamage
             effectType = getattr(effectDef, "type", None)
             effectType = effectType if isinstance(effectType, tuple) or effectType is None else (effectType,)
             self.__type = effectType
@@ -175,6 +182,7 @@ class Effect(EqBase):
             self.__handler = eos.effects.DummyEffect.handler
             self.__runTime = "normal"
             self.__activeByDefault = True
+            self.__dealsDamage = False
             self.__type = None
             pyfalog.debug("ImportError generating handler: {0}", e)
         except AttributeError as e:
@@ -182,6 +190,7 @@ class Effect(EqBase):
             self.__handler = eos.effects.DummyEffect.handler
             self.__runTime = "normal"
             self.__activeByDefault = True
+            self.__dealsDamage = False
             self.__type = None
             pyfalog.error("AttributeError generating handler: {0}", e)
         except (KeyboardInterrupt, SystemExit):
@@ -190,6 +199,7 @@ class Effect(EqBase):
             self.__handler = eos.effects.DummyEffect.handler
             self.__runTime = "normal"
             self.__activeByDefault = True
+            self.__dealsDamage = False
             self.__type = None
             pyfalog.critical("Exception generating handler:")
             pyfalog.critical(e)
@@ -209,40 +219,13 @@ class Effect(EqBase):
 
 
 class Item(EqBase):
-    MOVE_ATTRS = (4,  # Mass
-                  38,  # Capacity
-                  161)  # Volume
-
-    MOVE_ATTR_INFO = None
-
     ABYSSAL_TYPES = None
-
-    @classmethod
-    def getMoveAttrInfo(cls):
-        info = getattr(cls, "MOVE_ATTR_INFO", None)
-        if info is None:
-            cls.MOVE_ATTR_INFO = info = []
-            for id in cls.MOVE_ATTRS:
-                info.append(eos.db.getAttributeInfo(id))
-
-        return info
-
-    def moveAttrs(self):
-        self.__moved = True
-        for info in self.getMoveAttrInfo():
-            val = getattr(self, info.name, 0)
-            if val != 0:
-                attr = Attribute()
-                attr.info = info
-                attr.value = val
-                self.__attributes[info.name] = attr
 
     @reconstructor
     def init(self):
         self.__race = None
         self.__requiredSkills = None
         self.__requiredFor = None
-        self.__moved = False
         self.__offensive = None
         self.__assistive = None
         self.__overrides = None
@@ -264,9 +247,6 @@ class Item(EqBase):
 
     @property
     def attributes(self):
-        if not self.__moved:
-            self.moveAttrs()
-
         return self.__attributes
 
     @property
@@ -363,7 +343,11 @@ class Item(EqBase):
         if self.__race is None:
 
             try:
-                if self.category.categoryName == 'Structure':
+                if (
+                    self.category.categoryName == 'Structure' or
+                    # Here until CCP puts their shit together
+                    self.name in ("Thunderchild", "Stormbringer", "Skybreaker")
+                ):
                     self.__race = "upwell"
                 else:
                     self.__race = self.factionMap[self.factionID]

@@ -21,7 +21,7 @@ import datetime
 import time
 from copy import deepcopy
 from itertools import chain
-from math import log, sqrt
+from math import floor, log, sqrt
 
 from logbook import Logger
 from sqlalchemy.orm import reconstructor, validates
@@ -39,6 +39,7 @@ from eos.saveddata.damagePattern import DamagePattern
 from eos.saveddata.module import Module
 from eos.saveddata.ship import Ship
 from eos.saveddata.targetProfile import TargetProfile
+from eos.utils.float import floatUnerr
 from eos.utils.stats import DmgTypes, RRTypes
 
 
@@ -378,8 +379,9 @@ class Fit:
 
     @property
     def maxTargets(self):
-        return min(self.extraAttributes["maxTargetsLockedFromSkills"],
-                   self.ship.getModifiedItemAttr("maxLockedTargets"))
+        maxTargets = min(self.extraAttributes["maxTargetsLockedFromSkills"],
+                         self.ship.getModifiedItemAttr("maxLockedTargets"))
+        return floor(floatUnerr(maxTargets))
 
     @property
     def maxTargetRange(self):
@@ -1026,6 +1028,16 @@ class Fit:
             if mod.isEmpty:
                 del self.modules[i]
 
+    def clearTail(self):
+        tailPositions = {}
+        for mod in reversed(self.modules):
+            if not mod.isEmpty:
+                break
+            tailPositions[self.modules.index(mod)] = mod.slot
+        for pos in sorted(tailPositions, reverse=True):
+            self.modules.remove(self.modules[pos])
+        return tailPositions
+
     @property
     def modCount(self):
         x = 0
@@ -1135,7 +1147,7 @@ class Fit:
     def droneBayUsed(self):
         amount = 0
         for d in self.drones:
-            amount += d.item.volume * d.amount
+            amount += d.item.attributes['volume'].value * d.amount
 
         return amount
 
@@ -1143,7 +1155,7 @@ class Fit:
     def fighterBayUsed(self):
         amount = 0
         for f in self.fighters:
-            amount += f.item.volume * f.amount
+            amount += f.item.attributes['volume'].value * f.amount
 
         return amount
 

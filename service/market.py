@@ -18,6 +18,7 @@
 # ===============================================================================
 
 import queue
+import re
 import threading
 from collections import OrderedDict
 from itertools import chain
@@ -39,6 +40,10 @@ pyfalog = Logger(__name__)
 
 # Event which tells threads dependent on Market that it's initialized
 mktRdy = threading.Event()
+
+
+class RegexTokenizationError(Exception):
+    pass
 
 
 class ShipBrowserWorkerThread(threading.Thread):
@@ -90,13 +95,14 @@ class ShipBrowserWorkerThread(threading.Thread):
 
 
 class SearchWorkerThread(threading.Thread):
+
     def __init__(self):
         threading.Thread.__init__(self)
         self.name = "SearchWorker"
         self.jargonLoader = JargonLoader.instance()
         # load the jargon while in an out-of-thread context, to spot any problems while in the main thread
         self.jargonLoader.get_jargon()
-        self.jargonLoader.get_jargon().apply('test string')
+        self.jargonLoader.get_jargon().apply('test string'.split())
         self.running = True
 
     def run(self):
@@ -138,31 +144,27 @@ class SearchWorkerThread(threading.Thread):
             else:
                 filters = [None]
 
-            jargon_request = self.jargonLoader.get_jargon().apply(request)
+            if request.strip().lower().startswith('re:'):
+                requestTokens = self._prepareRequestRegex(request[3:])
+            else:
+                requestTokens = self._prepareRequestNormal(request)
+            requestTokens = self.jargonLoader.get_jargon().apply(requestTokens)
 
             all_results = set()
-            if len(request) >= config.minItemSearchLength:
+            if len(' '.join(requestTokens)) >= config.minItemSearchLength:
                 for filter_ in filters:
-                    regular_results = eos.db.searchItems(
-                        request, where=filter_,
+                    filtered_results = eos.db.searchItemsRegex(
+                        requestTokens, where=filter_,
                         join=(types_Item.group, types_Group.category),
                         eager=("group.category", "metaGroup"))
-                    all_results.update(regular_results)
+                    all_results.update(filtered_results)
 
-            if len(jargon_request) >= config.minItemSearchLength:
-                for filter_ in filters:
-                    jargon_results = eos.db.searchItems(
-                        jargon_request, where=filter_,
-                        join=(types_Item.group, types_Group.category),
-                        eager=("group.category", "metaGroup"))
-                    all_results.update(jargon_results)
-
-            items = set()
+            item_IDs = set()
             # Return only published items, consult with Market service this time
             for item in all_results:
                 if sMkt.getPublicityByItem(item):
-                    items.add(item)
-            wx.CallAfter(callback, list(items))
+                    item_IDs.add(item.ID)
+            wx.CallAfter(callback, sorted(item_IDs))
 
     def scheduleSearch(self, text, callback, filterName=None):
         self.cv.acquire()
@@ -172,6 +174,66 @@ class SearchWorkerThread(threading.Thread):
 
     def stop(self):
         self.running = False
+
+    def _prepareRequestNormal(self, request):
+        # Escape regexp-specific symbols, and un-escape whitespaces
+        request = re.escape(request)
+        request = re.sub(r'\\(?P<ws>\s+)', '\g<ws>', request)
+        # Imitate wildcard search
+        request = re.sub(r'\\\*', r'\\w*', request)
+        request = re.sub(r'\\\?', r'\\w?', request)
+        tokens = request.split()
+        return tokens
+
+    def _prepareRequestRegex(self, request):
+        roundLvl = 0
+        squareLvl = 0
+        nextEscaped = False
+        tokens = []
+        currentToken = ''
+
+        def verifyErrors():
+            if squareLvl not in (0, 1):
+                raise RegexTokenizationError('Square braces level is {}'.format(squareLvl))
+            if roundLvl < 0:
+                raise RegexTokenizationError('Round braces level is {}'.format(roundLvl))
+
+        try:
+            for char in request:
+                thisEscaped = nextEscaped
+                nextEscaped = False
+                if thisEscaped:
+                    currentToken += char
+                elif char == '\\':
+                    currentToken += char
+                    nextEscaped = True
+                elif char == '[':
+                    currentToken += char
+                    squareLvl += 1
+                elif char == ']':
+                    currentToken += char
+                    squareLvl -= 1
+                elif char == '(' and squareLvl == 0:
+                    currentToken += char
+                    roundLvl += 1
+                elif char == ')' and squareLvl == 0:
+                    currentToken += char
+                    roundLvl -= 1
+                elif char.isspace() and roundLvl == squareLvl == 0:
+                    if currentToken:
+                        tokens.append(currentToken)
+                        currentToken = ''
+                else:
+                    currentToken += char
+                verifyErrors()
+            else:
+                if currentToken:
+                    tokens.append(currentToken)
+        # Treat request as normal string if regex tokenization fails
+        except RegexTokenizationError:
+            tokens = self._prepareRequestNormal(request)
+        return tokens
+
 
 class Market:
     instance = None
@@ -297,7 +359,6 @@ class Market:
             "'Habitat' Miner I": ("Storyline", "Miner I"),
             "'Wild' Miner I": ("Storyline", "Miner I"),
             "Khanid Navy Torpedo Launcher": ("Faction", "Torpedo Launcher I"),
-            "Dark Blood Tracking Disruptor": ("Faction", "Tracking Disruptor I"),
             "Dread Guristas Standup Variable Spectrum ECM": ("Structure Faction", "Standup Variable Spectrum ECM I"),
             "Dark Blood Standup Heavy Energy Neutralizer": ("Structure Faction", "Standup Heavy Energy Neutralizer I")}
         # Parent type name: set(item names)
@@ -345,6 +406,12 @@ class Market:
         self.META_MAP["normal"] = frozenset((0, *(mg.ID for mg in eos.db.getMetaGroups() if mg.ID not in nonNormalMetas)))
         self.META_MAP.move_to_end("normal", last=False)
         self.META_MAP_REVERSE = {sv: k for k, v in self.META_MAP.items() for sv in v}
+        self.META_MAP_REVERSE_GROUPED = {}
+        i = 0
+        for mgids in self.META_MAP.values():
+            for mgid in mgids:
+                self.META_MAP_REVERSE_GROUPED[mgid] = i
+            i += 1
         self.META_MAP_REVERSE_INDICES = self.__makeReverseMetaMapIndices()
         self.SEARCH_CATEGORIES = (
             "Drone",
@@ -425,6 +492,11 @@ class Market:
             raise
 
         return item
+
+    @staticmethod
+    def getItems(itemIDs, eager=None):
+        items = eos.db.getItems(itemIDs, eager=eager)
+        return items
 
     def getGroup(self, identity, *args, **kwargs):
         """Get group by its ID or name"""
@@ -649,8 +721,9 @@ class Market:
         groupItems = set(group.items)
         if hasattr(group, 'addItems'):
             groupItems.update(group.addItems)
-        items = set(
-                [item for item in groupItems if self.getPublicityByItem(item) and self.getGroupByItem(item) == group])
+        items = set([
+            item for item in groupItems
+            if self.getPublicityByItem(item) and self.getGroupByItem(item) == group])
         return items
 
     def getItemsByMarketGroup(self, mg, vars_=True):
@@ -727,7 +800,7 @@ class Market:
                 except KeyError:
                     return ""
 
-                return item.iconID if item.icon else ""
+                return item.iconID if getattr(item, "icon", None) else ""
             elif self.getMarketGroupChildren(mg) > 0:
                 kids = self.getMarketGroupChildren(mg)
                 mktGroups = self.getIconByMarketGroup(kids)
@@ -872,3 +945,19 @@ class Market:
         while len(recentlyUsedModules) >= 20:
             recentlyUsedModules.pop(-1)
         recentlyUsedModules.insert(0, itemID)
+
+    def itemSort(self, item, reverseMktGrp=False):
+        catname = self.getCategoryByItem(item).name
+        try:
+            mktgrpid = self.getMarketGroupByItem(item).ID
+        except AttributeError:
+            mktgrpid = -1
+            pyfalog.warning("unable to find market group for {}".format(item.name))
+        if reverseMktGrp:
+            mktgrpid = -mktgrpid
+        parentname = self.getParentItemByItem(item).name
+        # Get position of market group
+        metagrpid = self.getMetaGroupIdByItem(item)
+        metatab = self.META_MAP_REVERSE_GROUPED.get(metagrpid)
+        metalvl = item.metaLevel or 0
+        return catname, mktgrpid, parentname, metatab, metalvl, item.name

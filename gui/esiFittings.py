@@ -5,16 +5,20 @@ import requests
 import wx
 from logbook import Logger
 
+import config
 import gui.globalEvents as GE
 from eos.db import getItem
 from eos.saveddata.cargo import Cargo
-from gui.auxFrame import AuxiliaryFrame
+from gui.auxWindow import AuxiliaryFrame
 from gui.display import Display
+from gui.characterEditor import APIView
+from service.character import Character
 from service.esi import Esi
 from service.esiAccess import APIException
 from service.fit import Fit
 from service.port import Port
 from service.port.esi import ESIExportException
+from service.settings import EsiSettings
 
 
 pyfalog = Logger(__name__)
@@ -204,7 +208,7 @@ class ExportToEve(AuxiliaryFrame):
     def __init__(self, parent):
         super().__init__(
             parent, id=wx.ID_ANY, title="Export fit to EVE", pos=wx.DefaultPosition,
-            size=wx.Size(400, 120) if "wxGTK" in wx.PlatformInfo else wx.Size(350, 100), resizeable=True)
+            size=wx.Size(400, 140) if "wxGTK" in wx.PlatformInfo else wx.Size(350, 115), resizeable=True)
 
         self.mainFrame = parent
 
@@ -221,6 +225,11 @@ class ExportToEve(AuxiliaryFrame):
 
         mainSizer.Add(hSizer, 0, wx.EXPAND, 5)
 
+        self.exportChargesCb = wx.CheckBox(self, wx.ID_ANY, 'Export Loaded Charges', wx.DefaultPosition, wx.DefaultSize, 0)
+        self.exportChargesCb.SetValue(EsiSettings.getInstance().get('exportCharges'))
+        self.exportChargesCb.Bind(wx.EVT_CHECKBOX, self.OnChargeExportChange)
+        mainSizer.Add(self.exportChargesCb, 0, 0, 5)
+
         self.exportBtn.Bind(wx.EVT_BUTTON, self.exportFitting)
 
         self.statusbar = wx.StatusBar(self)
@@ -235,6 +244,10 @@ class ExportToEve(AuxiliaryFrame):
         self.SetMinSize(self.GetSize())
 
         self.Center(wx.BOTH)
+
+    def OnChargeExportChange(self, event):
+        EsiSettings.getInstance().set('exportCharges', self.exportChargesCb.GetValue())
+        event.Skip()
 
     def updateCharList(self):
         sEsi = Esi.getInstance()
@@ -271,8 +284,9 @@ class ExportToEve(AuxiliaryFrame):
         sEsi = Esi.getInstance()
 
         sFit = Fit.getInstance()
+        exportCharges = self.exportChargesCb.GetValue()
         try:
-            data = sPort.exportESI(sFit.getFit(fitID))
+            data = sPort.exportESI(sFit.getFit(fitID), exportCharges)
         except ESIExportException as e:
             msg = str(e)
             if not msg:
@@ -335,7 +349,7 @@ class SsoCharacterMgmt(AuxiliaryFrame):
         self.addBtn = wx.Button(self, wx.ID_ANY, "Add Character", wx.DefaultPosition, wx.DefaultSize, 0)
         btnSizer.Add(self.addBtn, 0, wx.ALL | wx.EXPAND, 5)
 
-        self.deleteBtn = wx.Button(self, wx.ID_ANY, "Revoke Character", wx.DefaultPosition, wx.DefaultSize, 0)
+        self.deleteBtn = wx.Button(self, wx.ID_ANY, "Remove Character", wx.DefaultPosition, wx.DefaultSize, 0)
         btnSizer.Add(self.deleteBtn, 0, wx.ALL | wx.EXPAND, 5)
 
         mainSizer.Add(btnSizer, 0, wx.EXPAND, 5)
@@ -355,6 +369,16 @@ class SsoCharacterMgmt(AuxiliaryFrame):
 
     def ssoLogin(self, event):
         self.popCharList()
+        sChar = Character.getInstance()
+        # Update existing pyfa character, if it doesn't exist - create new
+        char = sChar.getCharacter(event.character.characterName)
+        newChar = False
+        if char is None:
+            char = sChar.new(event.character.characterName)
+            newChar = True
+        char.setSsoCharacter(event.character, config.getClientSecret())
+        sChar.apiFetch(char.ID, APIView.fetchCallback)
+        wx.PostEvent(self.mainFrame, GE.CharListUpdated())
         event.Skip()
 
     def kbEvent(self, event):

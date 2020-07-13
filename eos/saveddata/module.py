@@ -64,7 +64,9 @@ ProjectedSystem = {
 class Module(HandledItem, HandledCharge, ItemAttrShortcut, ChargeAttrShortcut):
     """An instance of this class represents a module together with its charge and modified attributes"""
     MINING_ATTRIBUTES = ("miningAmount",)
-    SYSTEM_GROUPS = ("Effect Beacon", "MassiveEnvironments", "Abyssal Hazards", "Non-Interactable Object")
+    SYSTEM_GROUPS = (
+        "Effect Beacon", "MassiveEnvironments", "Abyssal Hazards",
+        "Non-Interactable Object", "Destructible Effect Beacon")
 
     def __init__(self, item, baseItem=None, mutaplasmid=None):
         """Initialize a module from the program"""
@@ -214,8 +216,8 @@ class Module(HandledItem, HandledCharge, ItemAttrShortcut, ChargeAttrShortcut):
         if charge is None:
             charges = 0
         else:
-            chargeVolume = charge.volume
-            containerCapacity = self.item.capacity
+            chargeVolume = charge.attributes['volume'].value
+            containerCapacity = self.item.attributes['capacity'].value
             if chargeVolume is None or containerCapacity is None:
                 charges = 0
             else:
@@ -461,6 +463,20 @@ class Module(HandledItem, HandledCharge, ItemAttrShortcut, ChargeAttrShortcut):
                 return True
         return False
 
+    def canDealDamage(self, ignoreState=False):
+        if self.isEmpty:
+            return False
+        for effect in self.item.effects.values():
+            if effect.dealsDamage and (
+                ignoreState or
+                effect.isType('offline') or
+                (effect.isType('passive') and self.state >= FittingModuleState.ONLINE) or
+                (effect.isType('active') and self.state >= FittingModuleState.ACTIVE) or
+                (effect.isType('overheat') and self.state >= FittingModuleState.OVERHEATED)
+            ):
+                return True
+        return False
+
     def getVolleyParameters(self, spoolOptions=None, targetProfile=None, ignoreState=False):
         if self.isEmpty or (self.state < FittingModuleState.ACTIVE and not ignoreState):
             return {0: DmgTypes(0, 0, 0, 0)}
@@ -696,7 +712,7 @@ class Module(HandledItem, HandledCharge, ItemAttrShortcut, ChargeAttrShortcut):
 
         # Check this only if we're told to do so
         if hardpointLimit:
-            if fit.getHardpointsFree(self.hardpoint) < 1:
+            if fit.getHardpointsFree(self.hardpoint) < (1 if self.owner != fit else 0):
                 return False
 
         return True
@@ -711,6 +727,9 @@ class Module(HandledItem, HandledCharge, ItemAttrShortcut, ChargeAttrShortcut):
         elif state >= FittingModuleState.ACTIVE and (not self.item.isType("active") or self.getModifiedItemAttr('activationBlocked') > 0):
             return False
         elif state == FittingModuleState.OVERHEATED and not self.item.isType("overheat"):
+            return False
+        # Some destructible effect beacons contain active effects, hardcap those at online state
+        elif state > FittingModuleState.ONLINE and self.slot == FittingSlot.SYSTEM:
             return False
         else:
             return True
@@ -778,8 +797,8 @@ class Module(HandledItem, HandledCharge, ItemAttrShortcut, ChargeAttrShortcut):
         # Check sizes, if 'charge size > module volume' it won't fit
         if charge is None:
             return True
-        chargeVolume = charge.volume
-        moduleCapacity = self.item.capacity
+        chargeVolume = charge.attributes['volume'].value
+        moduleCapacity = self.item.attributes['capacity'].value
         if chargeVolume is not None and moduleCapacity is not None and chargeVolume > moduleCapacity:
             return False
 
@@ -1037,7 +1056,10 @@ class Module(HandledItem, HandledCharge, ItemAttrShortcut, ChargeAttrShortcut):
         elif click == "ctrl":
             state = FittingModuleState.OFFLINE
         else:
-            state = transitionMap[currState]
+            try:
+                state = transitionMap[currState]
+            except KeyError:
+                state = min(transitionMap)
             # If passive module tries to transition into online and fails,
             # put it to passive instead
             if not mod.isValidState(state) and currState == FittingModuleState.ONLINE:

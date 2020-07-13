@@ -1,15 +1,16 @@
 import wx
 from logbook import Logger
 
-from eos.saveddata.module import Module
 import gui.builtinMarketBrowser.pfSearchBox as SBox
+from config import slotColourMap
+from eos.saveddata.module import Module
 from gui.builtinMarketBrowser.events import ItemSelected, RECENTLY_USED_MODULES
 from gui.contextMenu import ContextMenu
 from gui.display import Display
 from gui.utils.staticHelpers import DragDropHelper
-from service.attribute import Attribute
 from service.fit import Fit
-from config import slotColourMap
+from service.market import Market
+
 
 pyfalog = Logger(__name__)
 
@@ -170,8 +171,8 @@ class ItemView(Display):
     def scheduleSearch(self, event=None):
         self.searchTimer.Stop()  # Cancel any pending timers
         search = self.marketBrowser.search.GetLineText(0)
-        # Make sure we do not count wildcard as search symbol
-        realsearch = search.replace("*", "")
+        # Make sure we do not count wildcards as search symbol
+        realsearch = search.replace('*', '').replace('?', '')
         # Re-select market group if search query has zero length
         if len(realsearch) == 0:
             self.selectionMade('search')
@@ -193,29 +194,14 @@ class ItemView(Display):
             self.setToggles()
             self.filterItemStore()
 
-    def populateSearch(self, items):
+    def populateSearch(self, itemIDs):
         # If we're no longer searching, dump the results
         if self.marketBrowser.mode != 'search':
             return
+        items = Market.getItems(itemIDs)
         self.updateItemStore(items)
         self.setToggles()
         self.filterItemStore()
-
-    def itemSort(self, item):
-        sMkt = self.sMkt
-        catname = sMkt.getCategoryByItem(item).name
-        try:
-            mktgrpid = sMkt.getMarketGroupByItem(item).ID
-        except AttributeError:
-            mktgrpid = -1
-            pyfalog.warning("unable to find market group for {}".format(item.name))
-        parentname = sMkt.getParentItemByItem(item).name
-        # Get position of market group
-        metagrpid = sMkt.getMetaGroupIdByItem(item)
-        metatab = sMkt.META_MAP_REVERSE_INDICES.get(metagrpid)
-        metalvl = item.metaLevel or 0
-
-        return catname, mktgrpid, parentname, metatab, metalvl, item.name
 
     def contextMenu(self, event):
         clickedPos = self.getRowByAbs(event.Position)
@@ -239,7 +225,7 @@ class ItemView(Display):
             self.unselectAll()
             # Perform sorting, using item's meta levels besides other stuff
             if self.marketBrowser.mode != 'recent':
-                items.sort(key=self.itemSort)
+                items.sort(key=self.sMkt.itemSort)
         # Mark current item list as active
         self.active = items
         # Show them
@@ -249,12 +235,10 @@ class ItemView(Display):
         if len(items) > 1:
             # Re-sort stuff
             if self.marketBrowser.mode != 'recent':
-                items.sort(key=self.itemSort)
-
+                items.sort(key=self.sMkt.itemSort)
         for i, item in enumerate(items[:9]):
             # set shortcut info for first 9 modules
             item.marketShortcut = i + 1
-
         Display.refresh(self, items)
 
     def columnBackground(self, colItem, item):

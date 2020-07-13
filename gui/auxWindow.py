@@ -22,12 +22,14 @@
 import wx
 
 
-class AuxiliaryFrame(wx.Frame):
+class AuxiliaryMixin:
 
     _instance = None
 
     def __init__(self, parent, id=None, title=None, pos=None, size=None, style=None, name=None, resizeable=False):
-        baseStyle = wx.FRAME_NO_TASKBAR | wx.FRAME_FLOAT_ON_PARENT | wx.CAPTION | wx.CLOSE_BOX | wx.SYSTEM_MENU
+        baseStyle = wx.FRAME_NO_TASKBAR | wx.CAPTION | wx.CLOSE_BOX | wx.SYSTEM_MENU
+        if parent is not None:
+            baseStyle = baseStyle | wx.FRAME_FLOAT_ON_PARENT
         if resizeable:
             baseStyle = baseStyle | wx.RESIZE_BORDER | wx.MAXIMIZE_BOX
         kwargs = {
@@ -53,14 +55,26 @@ class AuxiliaryFrame(wx.Frame):
             self.SetBackgroundColour(wx.SystemSettings.GetColour(wx.SYS_COLOUR_BTNFACE))
 
     @classmethod
-    def openOne(cls, parent, *args, **kwargs):
+    def openOne(cls, parent, *args, forceReopen=False, **kwargs):
         """If window is open and alive - raise it, open otherwise"""
-        if not cls._instance:
+        if not cls._instance or forceReopen:
+            if cls._instance:
+                cls._instance.Close()
             frame = cls(parent, *args, **kwargs)
             cls._instance = frame
             frame.Show()
         else:
             cls._instance.Raise()
+        return cls._instance
+
 
     def OnSuppressedAction(self, event):
         return
+
+
+class AuxiliaryFrame(AuxiliaryMixin, wx.Frame):
+    pass
+
+
+class AuxiliaryDialog(AuxiliaryMixin, wx.Dialog):
+    pass

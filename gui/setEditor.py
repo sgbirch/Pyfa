@@ -21,7 +21,7 @@
 import wx
 from logbook import Logger
 
-from gui.auxFrame import AuxiliaryFrame
+from gui.auxWindow import AuxiliaryFrame
 from gui.builtinViews.entityEditor import BaseValidator, EntityEditor
 from gui.builtinViews.implantEditor import BaseImplantEditorView
 from gui.utils.clipboard import fromClipboard, toClipboard
@@ -159,7 +159,7 @@ class ImplantSetEditor(AuxiliaryFrame):
             setattr(self, name, btn)
             btn.Enable(True)
             btn.SetToolTip("%s implant sets %s clipboard" % (name, direction))
-            footerSizer.Add(btn, 0, wx.ALIGN_CENTER_HORIZONTAL | wx.ALIGN_RIGHT)
+            footerSizer.Add(btn, 0)
 
         mainSizer.Add(footerSizer, 0, wx.ALL | wx.EXPAND, 5)
 

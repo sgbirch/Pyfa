@@ -33,7 +33,7 @@ DB_PATH = os.path.join(ROOT_DIR, 'eve.db')
 JSON_DIR = os.path.join(ROOT_DIR, 'staticdata')
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
-GAMEDATA_SCHEMA_VERSION = 3
+GAMEDATA_SCHEMA_VERSION = 4
 
 
 def db_needs_update():
@@ -122,9 +122,13 @@ def update_db():
             if (
                 # Apparently people really want Civilian modules available
                 (row['typeName'].startswith('Civilian') and "Shuttle" not in row['typeName']) or
-                row['typeName'] in ('Capsule', 'Dark Blood Tracking Disruptor')
+                row['typeName'] == 'Capsule' or
+                row['groupID'] == 4033  # destructible effect beacons
             ):
                 row['published'] = True
+            # Nearly useless and clutter search results too much
+            elif row['typeName'].startswith('Limited Synth '):
+                row['published'] = False
 
         newData = []
         for row in data:
@@ -136,11 +140,10 @@ def update_db():
                 row['typeID'] in (41549, 41548, 41551, 41550) or
                 # Abyssal weather (environment)
                 row['groupID'] in (
-                1882,
-                1975,
-                1971,
-                # the "container" for the abyssal environments
-                1983)
+                    1882,
+                    1975,
+                    1971,
+                    1983)  # the "container" for the abyssal environments
             ):
                 newData.append(row)
 
@@ -168,16 +171,26 @@ def update_db():
         data = _readData('fsd_binary', 'typedogma', keyIdName='typeID')
         eveTypeIds = set(r['typeID'] for r in eveTypesData)
         newData = []
-        for row in eveTypesData:
-            for attrId, attrName in {4: 'mass', 38: 'capacity', 161: 'volume', 162: 'radius'}.items():
-                if attrName in row:
-                    newData.append({'typeID': row['typeID'], 'attributeID': attrId, 'value': row[attrName]})
+        seenKeys = set()
+
+        def checkKey(key):
+            if key in seenKeys:
+                return False
+            seenKeys.add(key)
+            return True
+
         for typeData in data:
             if typeData['typeID'] not in eveTypeIds:
                 continue
             for row in typeData.get('dogmaAttributes', ()):
                 row['typeID'] = typeData['typeID']
-                newData.append(row)
+                if checkKey((row['typeID'], row['attributeID'])):
+                    newData.append(row)
+        for row in eveTypesData:
+            for attrId, attrName in {4: 'mass', 38: 'capacity', 161: 'volume', 162: 'radius'}.items():
+                if attrName in row and checkKey((row['typeID'], attrId)):
+                    newData.append({'typeID': row['typeID'], 'attributeID': attrId, 'value': row[attrName]})
+
         _addRows(newData, eos.gamedata.Attribute)
         return newData
 
@@ -315,8 +328,8 @@ def update_db():
 
         def composeReqSkills(raw):
             reqSkills = {}
-            for skillTypeID, skillLevels in raw.items():
-                reqSkills[int(skillTypeID)] = skillLevels[0]
+            for skillTypeID, skillLevel in raw.items():
+                reqSkills[int(skillTypeID)] = skillLevel
             return reqSkills
 
         eveTypeIds = set(r['typeID'] for r in eveTypesData)
@@ -472,7 +485,7 @@ def update_db():
                 continue
             typeName = row.get('typeName', '')
             # Regular sets matching
-            m = re.match('(?P<grade>(High|Mid|Low)-grade) (?P<set>\w+) (?P<implant>(Alpha|Beta|Gamma|Delta|Epsilon|Omega))', typeName)
+            m = re.match('(?P<grade>(High|Mid|Low)-grade) (?P<set>\w+) (?P<implant>(Alpha|Beta|Gamma|Delta|Epsilon|Omega))', typeName, re.IGNORECASE)
             if m:
                 implantSets.setdefault((m.group('grade'), m.group('set')), set()).add(row['typeID'])
             # Special set matching
